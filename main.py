@@ -1,10 +1,10 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 import yt_dlp
 import os
 import base64
 import tempfile
-import re
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -79,7 +79,6 @@ def get_ydl_opts(platform):
     return base
 
 def find_best_audio_url(formats):
-    """En iyi ses URL'sini bulur. acodec null veya none olsa bile format_id'e göre yakalar."""
     best_audio = None
     best_abr = 0
     for f in formats:
@@ -92,7 +91,6 @@ def find_best_audio_url(formats):
         if not furl:
             continue
 
-        # vcodec yok ama ses formatı — format_id'de Audio geçiyorsa da yakala
         is_audio_format = (vcodec == 'none') and ('audio' in format_id.lower() or acodec != 'none')
 
         if is_audio_format and abr > best_abr:
@@ -197,6 +195,52 @@ def get_info():
     except Exception as e:
         return jsonify({'error': str(e)[:200]}), 500
 
+
+# ── TikTok ve Twitter için proxy ──────────────────────────────────────────────
+# TikTok CDN imzalı URL'lere direkt istek atınca 403 veriyor.
+# Proxy sunucu üzerinden doğru headerlarla istek atarak bunu aşıyoruz.
+@app.route('/proxy', methods=['GET'])
+def proxy():
+    url = request.args.get('url', '')
+    if not url:
+        return jsonify({'error': 'URL gerekli'}), 400
+
+    platform = ''
+    if 'tiktok.com' in url or 'tiktokcdn.com' in url:
+        platform = 'TikTok'
+    elif 'twitter.com' in url or 'twimg.com' in url or 'x.com' in url:
+        platform = 'Twitter'
+
+    # Platforma göre doğru headerları gönder
+    if platform == 'TikTok':
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Referer': 'https://www.tiktok.com/',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'identity',  # gzip/br istemiyoruz, raw video istiyoruz
+            'Range': request.headers.get('Range', 'bytes=0-'),
+        }
+    else:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            'Referer': 'https://twitter.com/',
+            'Accept': '*/*',
+            'Accept-Encoding': 'identity',
+            'Range': request.headers.get('Range', 'bytes=0-'),
+        }
+
+    try:
+        r = requests.get(url, headers=headers, stream=True, timeout=60)
+        return Response(
+            r.iter_content(chunk_size=8192),
+            content_type=r.headers.get('Content-Type', 'video/mp4'),
+            status=r.status_code,
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/health', methods=['GET'])
 def health():
     ig_status = "✓" if os.environ.get('COOKIES_B64') else "✗"
@@ -210,27 +254,6 @@ def health():
         'tiktok_cookies': tk_status,
     })
 
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
-
-
-@app.route('/proxy', methods=['GET'])
-def proxy():
-    import requests
-    from flask import Response
-    url = request.args.get('url', '')
-    if not url:
-        return jsonify({'error': 'URL gerekli'}), 400
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-            'Referer': 'https://twitter.com/',
-        }
-        r = requests.get(url, headers=headers, stream=True, timeout=60)
-        return Response(
-            r.iter_content(chunk_size=8192),
-            content_type=r.headers.get('Content-Type', 'video/mp4'),
-            status=r.status_code,
-        )
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
