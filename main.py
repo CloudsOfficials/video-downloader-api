@@ -77,6 +77,20 @@ def get_ydl_opts(platform):
 
     return base
 
+def find_best_audio_url(formats):
+    """Formatlar arasından en iyi ses URL'sini bulur."""
+    best_audio = None
+    best_abr = 0
+    for f in formats:
+        vcodec = f.get('vcodec', 'none')
+        acodec = f.get('acodec', 'none')
+        abr = f.get('abr', 0) or 0
+        furl = f.get('url', '')
+        if vcodec == 'none' and acodec != 'none' and furl and abr > best_abr:
+            best_abr = abr
+            best_audio = furl
+    return best_audio
+
 @app.route('/info', methods=['GET'])
 def get_info():
     url = request.args.get('url', '')
@@ -90,6 +104,9 @@ def get_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
+
+            # Platformlar için ses URL'sini önceden bul
+            best_audio_url = find_best_audio_url(formats)
 
             qualities = []
             seen_heights = set()
@@ -109,12 +126,10 @@ def get_info():
                     seen_heights.add(height)
                     seen_urls.add(furl)
 
+                    # Video+ses ayrı stream olan platformlar için audio_url ekle
                     audio_url = None
-                    if platform == 'Instagram':
-                        for af in formats:
-                            if af.get('vcodec') == 'none' and af.get('acodec') != 'none' and af.get('url'):
-                                audio_url = af.get('url')
-                                break
+                    if platform in ('Instagram', 'Twitter'):
+                        audio_url = best_audio_url
 
                     qualities.append({
                         'label': f'{height}p',
@@ -124,21 +139,10 @@ def get_info():
                         'size': '',
                     })
 
-            best_audio = None
-            best_abr = 0
-            for f in formats:
-                vcodec = f.get('vcodec', 'none')
-                acodec = f.get('acodec', 'none')
-                abr = f.get('abr', 0) or 0
-                furl = f.get('url', '')
-                if vcodec == 'none' and acodec != 'none' and furl and abr > best_abr:
-                    best_abr = abr
-                    best_audio = furl
-
-            if best_audio:
+            if best_audio_url:
                 qualities.append({
                     'label': 'Ses (MP3)',
-                    'url': best_audio,
+                    'url': best_audio_url,
                     'audio_url': None,
                     'format': 'mp3',
                     'size': '',
