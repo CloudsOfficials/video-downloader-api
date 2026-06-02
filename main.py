@@ -9,7 +9,6 @@ app = Flask(__name__)
 CORS(app)
 
 def create_cookie_file(b64_content):
-    """Base64 encoded cookie içeriğini geçici dosyaya yazar"""
     try:
         decoded = base64.b64decode(b64_content).decode('utf-8')
         tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
@@ -93,6 +92,7 @@ def get_info():
                 ext = f.get('ext', 'mp4')
                 furl = f.get('url', '')
                 vcodec = f.get('vcodec', 'none')
+                acodec = f.get('acodec', 'none')
 
                 if not furl or furl in seen_urls:
                     continue
@@ -100,9 +100,19 @@ def get_info():
                 if vcodec != 'none' and height and height not in seen_heights:
                     seen_heights.add(height)
                     seen_urls.add(furl)
+
+                    # Instagram için ses URL'sini bul ve ekle
+                    audio_url = None
+                    if platform == 'Instagram':
+                        for af in formats:
+                            if af.get('vcodec') == 'none' and af.get('acodec') != 'none' and af.get('url'):
+                                audio_url = af.get('url')
+                                break
+
                     qualities.append({
                         'label': f'{height}p',
                         'url': furl,
+                        'audio_url': audio_url,  # Flutter bunu ayrıca indirecek
                         'format': ext if ext not in ['none', ''] else 'mp4',
                         'size': '',
                     })
@@ -122,6 +132,7 @@ def get_info():
                 qualities.append({
                     'label': 'Ses (MP3)',
                     'url': best_audio,
+                    'audio_url': None,
                     'format': 'mp3',
                     'size': '',
                 })
@@ -141,6 +152,7 @@ def get_info():
                 qualities.append({
                     'label': 'HD',
                     'url': info['url'],
+                    'audio_url': None,
                     'format': info.get('ext', 'mp4'),
                     'size': '',
                 })
