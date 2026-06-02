@@ -1,9 +1,23 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import yt_dlp
+import os
+import base64
+import tempfile
 
 app = Flask(__name__)
 CORS(app)
+
+def create_cookie_file(b64_content):
+    """Base64 encoded cookie içeriğini geçici dosyaya yazar"""
+    try:
+        decoded = base64.b64decode(b64_content).decode('utf-8')
+        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+        tmp.write(decoded)
+        tmp.flush()
+        return tmp.name
+    except:
+        return None
 
 def get_platform(url):
     if 'tiktok.com' in url: return 'TikTok'
@@ -20,25 +34,38 @@ def get_ydl_opts(platform):
         'noplaylist': True,
     }
 
-    if platform == 'TikTok':
-        base['extractor_args'] = {
-            'tiktok': {'api_hostname': 'api22-normal-c-alisg.tiktokv.com'}
-        }
-
     if platform == 'Instagram':
+        b64 = os.environ.get('COOKIES_B64')
+        if b64:
+            cookie_file = create_cookie_file(b64)
+            if cookie_file:
+                base['cookiefile'] = cookie_file
         base['http_headers'] = {
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.instagram.com/',
         }
-        base['cookiefile'] = None
 
     if platform == 'Twitter':
+        b64 = os.environ.get('COOKIES_B64_TWITTER')
+        if b64:
+            cookie_file = create_cookie_file(b64)
+            if cookie_file:
+                base['cookiefile'] = cookie_file
         base['http_headers'] = {
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
         }
         base['extractor_args'] = {
             'twitter': {'api': ['syndication']}
+        }
+
+    if platform == 'TikTok':
+        base['extractor_args'] = {
+            'tiktok': {'api_hostname': 'api22-normal-c-alisg.tiktokv.com'}
+        }
+        base['http_headers'] = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
         }
 
     return base
@@ -61,13 +88,11 @@ def get_info():
             seen_heights = set()
             seen_urls = set()
 
-            # Video formatları
             for f in reversed(formats):
                 height = f.get('height')
                 ext = f.get('ext', 'mp4')
                 furl = f.get('url', '')
                 vcodec = f.get('vcodec', 'none')
-                acodec = f.get('acodec', 'none')
 
                 if not furl or furl in seen_urls:
                     continue
@@ -82,7 +107,6 @@ def get_info():
                         'size': '',
                     })
 
-            # Ses formatı
             best_audio = None
             best_abr = 0
             for f in formats:
@@ -102,7 +126,6 @@ def get_info():
                     'size': '',
                 })
 
-            # Yüksekten düşüğe sırala
             def sort_key(q):
                 try:
                     return int(q['label'].replace('p', ''))
@@ -114,7 +137,6 @@ def get_info():
             video_q.sort(key=sort_key, reverse=True)
             qualities = video_q + audio_q
 
-            # Hiç format bulunamadıysa direkt url dene
             if not qualities and info.get('url'):
                 qualities.append({
                     'label': 'HD',
@@ -138,14 +160,23 @@ def get_info():
     except yt_dlp.utils.ExtractorError as e:
         err = str(e)
         if 'login' in err.lower() or 'private' in err.lower():
-            return jsonify({'error': 'Bu içerik özel. Herkese açık bir link dene.'}), 500
+            return jsonify({'error': 'Bu içerik özel veya giriş gerektiriyor.'}), 500
+        if 'rate' in err.lower():
+            return jsonify({'error': 'Rate limit aşıldı. Biraz bekle.'}), 500
         return jsonify({'error': f'Video alınamadı: {err[:200]}'}), 500
     except Exception as e:
         return jsonify({'error': str(e)[:200]}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'message': 'Video Downloader API çalışıyor!'})
+    ig_status = "✓" if os.environ.get('COOKIES_B64') else "✗"
+    tw_status = "✓" if os.environ.get('COOKIES_B64_TWITTER') else "✗"
+    return jsonify({
+        'status': 'ok',
+        'message': 'Video Downloader API çalışıyor!',
+        'instagram_cookies': ig_status,
+        'twitter_cookies': tw_status,
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
