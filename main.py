@@ -192,3 +192,25 @@ def health():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
+
+
+@app.route('/proxy', methods=['GET'])
+def proxy():
+    import requests
+    from flask import Response
+    url = request.args.get('url', '')
+    if not url:
+        return jsonify({'error': 'URL gerekli'}), 400
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            'Referer': 'https://twitter.com/',
+        }
+        r = requests.get(url, headers=headers, stream=True, timeout=60)
+        return Response(
+            r.iter_content(chunk_size=8192),
+            content_type=r.headers.get('Content-Type', 'video/mp4'),
+            status=r.status_code,
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
