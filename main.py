@@ -5,6 +5,7 @@ import os
 import base64
 import tempfile
 import requests
+import urllib.parse
 
 app = Flask(__name__)
 CORS(app)
@@ -136,18 +137,30 @@ def get_info():
                     if platform in ('Instagram', 'Twitter'):
                         audio_url = best_audio_url
 
+                    # Otomatik Proxy Enjeksiyonu: TikTok ve Twitter linklerini backend'de sarmallıyoruz
+                    final_video_url = furl
+                    final_audio_url = audio_url
+
+                    if platform in ('TikTok', 'Twitter'):
+                        final_video_url = f"{request.host_url}proxy?platform={platform}&url={urllib.parse.quote(furl)}"
+                        if audio_url:
+                            final_audio_url = f"{request.host_url}proxy?platform={platform}&url={urllib.parse.quote(audio_url)}"
+
                     qualities.append({
                         'label': f'{height}p',
-                        'url': furl,
-                        'audio_url': audio_url,
+                        'url': final_video_url,
+                        'audio_url': final_audio_url or '',
                         'format': ext if ext not in ['none', ''] else 'mp4',
                         'size': '',
                     })
 
             if best_audio_url:
+                final_track = best_audio_url
+                if platform in ('TikTok', 'Twitter'):
+                    final_track = f"{request.host_url}proxy?platform={platform}&url={urllib.parse.quote(best_audio_url)}"
                 qualities.append({
                     'label': 'Ses (MP3)',
-                    'url': best_audio_url,
+                    'url': final_track,
                     'audio_url': None,
                     'format': 'mp3',
                     'size': '',
@@ -165,9 +178,12 @@ def get_info():
             qualities = video_q + audio_q
 
             if not qualities and info.get('url'):
+                fallback_url = info['url']
+                if platform in ('TikTok', 'Twitter'):
+                    fallback_url = f"{request.host_url}proxy?platform={platform}&url={urllib.parse.quote(fallback_url)}"
                 qualities.append({
                     'label': 'HD',
-                    'url': info['url'],
+                    'url': fallback_url,
                     'audio_url': None,
                     'format': info.get('ext', 'mp4'),
                     'size': '',
@@ -196,29 +212,29 @@ def get_info():
         return jsonify({'error': str(e)[:200]}), 500
 
 
-# ── TikTok ve Twitter için proxy ──────────────────────────────────────────────
-# TikTok CDN imzalı URL'lere direkt istek atınca 403 veriyor.
-# Proxy sunucu üzerinden doğru headerlarla istek atarak bunu aşıyoruz.
 @app.route('/proxy', methods=['GET'])
 def proxy():
     url = request.args.get('url', '')
+    platform = request.args.get('platform', '')  # Parametreyi doğrudan alıyoruz, tahmin yürütmüyoruz!
+    
     if not url:
         return jsonify({'error': 'URL gerekli'}), 400
 
-    platform = ''
-    if 'tiktok.com' in url or 'tiktokcdn.com' in url:
-        platform = 'TikTok'
-    elif 'twitter.com' in url or 'twimg.com' in url or 'x.com' in url:
-        platform = 'Twitter'
+    # Eğer platform parametresi gelmediyse güvenli fallback araması yap
+    if not platform:
+        if 'tiktok' in url or 'byteoversea' in url or 'ibyteimg' in url:
+            platform = 'TikTok'
+        elif 'twitter' in url or 'twimg' in url or 'x.com' in url:
+            platform = 'Twitter'
 
-    # Platforma göre doğru headerları gönder
+    # Hangi platformsa, analiz edilirken kullanılan BİREBİR AYNI başlıkları basıyoruz
     if platform == 'TikTok':
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
             'Referer': 'https://www.tiktok.com/',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'identity',  # gzip/br istemiyoruz, raw video istiyoruz
+            'Accept-Encoding': 'identity',
             'Range': request.headers.get('Range', 'bytes=0-'),
         }
     else:
@@ -232,11 +248,14 @@ def proxy():
 
     try:
         r = requests.get(url, headers=headers, stream=True, timeout=60)
-        return Response(
+        response = Response(
             r.iter_content(chunk_size=8192),
             content_type=r.headers.get('Content-Type', 'video/mp4'),
             status=r.status_code,
         )
+        if r.headers.get('Content-Length'):
+            response.headers['Content-Length'] = r.headers.get('Content-Length')
+        return response
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
