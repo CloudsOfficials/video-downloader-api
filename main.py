@@ -5,7 +5,6 @@ import os
 import base64
 import tempfile
 import re
-import json
 
 app = Flask(__name__)
 CORS(app)
@@ -80,16 +79,26 @@ def get_ydl_opts(platform):
     return base
 
 def find_best_audio_url(formats):
+    """En iyi ses URL'sini bulur. acodec null veya none olsa bile format_id'e göre yakalar."""
     best_audio = None
     best_abr = 0
     for f in formats:
-        vcodec = f.get('vcodec', 'none')
-        acodec = f.get('acodec', 'none')
+        vcodec = f.get('vcodec') or 'none'
+        acodec = f.get('acodec') or 'none'
+        format_id = f.get('format_id', '')
         abr = f.get('abr', 0) or 0
         furl = f.get('url', '')
-        if vcodec == 'none' and acodec != 'none' and furl and abr > best_abr:
+
+        if not furl:
+            continue
+
+        # vcodec yok ama ses formatı — format_id'de Audio geçiyorsa da yakala
+        is_audio_format = (vcodec == 'none') and ('audio' in format_id.lower() or acodec != 'none')
+
+        if is_audio_format and abr > best_abr:
             best_abr = abr
             best_audio = furl
+
     return best_audio
 
 @app.route('/info', methods=['GET'])
@@ -106,21 +115,6 @@ def get_info():
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
 
-            # GEÇİCİ LOG - formatları görelim
-            if platform == 'Twitter':
-                print("=== TÜM FORMATLAR ===")
-                for f in formats:
-                    print(json.dumps({
-                        'format_id': f.get('format_id'),
-                        'ext': f.get('ext'),
-                        'vcodec': f.get('vcodec'),
-                        'acodec': f.get('acodec'),
-                        'url': f.get('url', '')[:100],
-                        'height': f.get('height'),
-                        'abr': f.get('abr'),
-                    }))
-                print("=== BİTTİ ===")
-
             best_audio_url = find_best_audio_url(formats)
 
             qualities = []
@@ -131,7 +125,7 @@ def get_info():
                 height = f.get('height')
                 ext = f.get('ext', 'mp4')
                 furl = f.get('url', '')
-                vcodec = f.get('vcodec', 'none')
+                vcodec = f.get('vcodec') or 'none'
 
                 if not furl or furl in seen_urls:
                     continue
