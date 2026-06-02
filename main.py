@@ -5,6 +5,7 @@ import os
 import base64
 import tempfile
 import re
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -91,19 +92,6 @@ def find_best_audio_url(formats):
             best_audio = furl
     return best_audio
 
-def get_twitter_audio_url(video_m3u8_url):
-    """Twitter video .m3u8 URL'sinden ses stream URL'sini türetir."""
-    try:
-        # https://video.twimg.com/amplify_video/ID/pl/avc1/WxH/xxx.m3u8
-        # -> https://video.twimg.com/amplify_video/ID/pl/audio/en_US/index.m3u8
-        match = re.match(r'(https://video\.twimg\.com/(?:amplify_video|ext_tw_video)/\d+)/pl/', video_m3u8_url)
-        if match:
-            base = match.group(1)
-            return f'{base}/pl/audio/en_US/index.m3u8'
-    except:
-        pass
-    return None
-
 @app.route('/info', methods=['GET'])
 def get_info():
     url = request.args.get('url', '')
@@ -117,6 +105,21 @@ def get_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
+
+            # GEÇİCİ LOG - formatları görelim
+            if platform == 'Twitter':
+                print("=== TÜM FORMATLAR ===")
+                for f in formats:
+                    print(json.dumps({
+                        'format_id': f.get('format_id'),
+                        'ext': f.get('ext'),
+                        'vcodec': f.get('vcodec'),
+                        'acodec': f.get('acodec'),
+                        'url': f.get('url', '')[:100],
+                        'height': f.get('height'),
+                        'abr': f.get('abr'),
+                    }))
+                print("=== BİTTİ ===")
 
             best_audio_url = find_best_audio_url(formats)
 
@@ -138,11 +141,8 @@ def get_info():
                     seen_urls.add(furl)
 
                     audio_url = None
-                    if platform == 'Instagram':
+                    if platform in ('Instagram', 'Twitter'):
                         audio_url = best_audio_url
-                    elif platform == 'Twitter':
-                        # Önce formatlardan bulmaya çalış, yoksa URL'den türet
-                        audio_url = best_audio_url or get_twitter_audio_url(furl)
 
                     qualities.append({
                         'label': f'{height}p',
