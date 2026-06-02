@@ -60,11 +60,19 @@ def get_ydl_opts(platform):
         }
 
     if platform == 'TikTok':
-        base['extractor_args'] = {
-            'tiktok': {'api_hostname': 'api22-normal-c-alisg.tiktokv.com'}
-        }
+        b64 = os.environ.get('COOKIES_B64_TIKTOK')
+        if b64:
+            cookie_file = create_cookie_file(b64)
+            if cookie_file:
+                base['cookiefile'] = cookie_file
         base['http_headers'] = {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 12; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Referer': 'https://www.tiktok.com/',
+        }
+        base['extractor_args'] = {
+            'tiktok': {
+                'webpage_download': ['true'],
+            }
         }
 
     return base
@@ -101,7 +109,6 @@ def get_info():
                     seen_heights.add(height)
                     seen_urls.add(furl)
 
-                    # Instagram için ses URL'sini bul ve ekle
                     audio_url = None
                     if platform == 'Instagram':
                         for af in formats:
@@ -112,7 +119,7 @@ def get_info():
                     qualities.append({
                         'label': f'{height}p',
                         'url': furl,
-                        'audio_url': audio_url,  # Flutter bunu ayrıca indirecek
+                        'audio_url': audio_url,
                         'format': ext if ext not in ['none', ''] else 'mp4',
                         'size': '',
                     })
@@ -183,11 +190,13 @@ def get_info():
 def health():
     ig_status = "✓" if os.environ.get('COOKIES_B64') else "✗"
     tw_status = "✓" if os.environ.get('COOKIES_B64_TWITTER') else "✗"
+    tk_status = "✓" if os.environ.get('COOKIES_B64_TIKTOK') else "✗"
     return jsonify({
         'status': 'ok',
         'message': 'Video Downloader API çalışıyor!',
         'instagram_cookies': ig_status,
         'twitter_cookies': tw_status,
+        'tiktok_cookies': tk_status,
     })
 
 if __name__ == '__main__':
