@@ -4,6 +4,7 @@ import yt_dlp
 import os
 import base64
 import tempfile
+import re
 
 app = Flask(__name__)
 CORS(app)
@@ -78,7 +79,6 @@ def get_ydl_opts(platform):
     return base
 
 def find_best_audio_url(formats):
-    """Formatlar arasından en iyi ses URL'sini bulur."""
     best_audio = None
     best_abr = 0
     for f in formats:
@@ -90,6 +90,19 @@ def find_best_audio_url(formats):
             best_abr = abr
             best_audio = furl
     return best_audio
+
+def get_twitter_audio_url(video_m3u8_url):
+    """Twitter video .m3u8 URL'sinden ses stream URL'sini türetir."""
+    try:
+        # https://video.twimg.com/amplify_video/ID/pl/avc1/WxH/xxx.m3u8
+        # -> https://video.twimg.com/amplify_video/ID/pl/audio/en_US/index.m3u8
+        match = re.match(r'(https://video\.twimg\.com/(?:amplify_video|ext_tw_video)/\d+)/pl/', video_m3u8_url)
+        if match:
+            base = match.group(1)
+            return f'{base}/pl/audio/en_US/index.m3u8'
+    except:
+        pass
+    return None
 
 @app.route('/info', methods=['GET'])
 def get_info():
@@ -105,7 +118,6 @@ def get_info():
             info = ydl.extract_info(url, download=False)
             formats = info.get('formats', [])
 
-            # Platformlar için ses URL'sini önceden bul
             best_audio_url = find_best_audio_url(formats)
 
             qualities = []
@@ -117,7 +129,6 @@ def get_info():
                 ext = f.get('ext', 'mp4')
                 furl = f.get('url', '')
                 vcodec = f.get('vcodec', 'none')
-                acodec = f.get('acodec', 'none')
 
                 if not furl or furl in seen_urls:
                     continue
@@ -126,10 +137,12 @@ def get_info():
                     seen_heights.add(height)
                     seen_urls.add(furl)
 
-                    # Video+ses ayrı stream olan platformlar için audio_url ekle
                     audio_url = None
-                    if platform in ('Instagram', 'Twitter'):
+                    if platform == 'Instagram':
                         audio_url = best_audio_url
+                    elif platform == 'Twitter':
+                        # Önce formatlardan bulmaya çalış, yoksa URL'den türet
+                        audio_url = best_audio_url or get_twitter_audio_url(furl)
 
                     qualities.append({
                         'label': f'{height}p',
